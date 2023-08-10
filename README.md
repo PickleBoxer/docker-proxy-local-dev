@@ -1,7 +1,9 @@
 # Docker Local Development with Traefik
 
-Traefik can be configured to accept incoming HTTPS connections in order to terminate the SSL connections. It can be configured to use an ACME provider (like Let's Encrypt or [Step-Ca](https://smallstep.com/certificates/)) for automatic certificate generation.
+[Traefik](https://traefik.io/traefik/) can be configured to accept incoming HTTPS connections in order to terminate the SSL connections. It can be configured to use an ACME provider (like Let's Encrypt or [Step-Ca](https://smallstep.com/certificates/)) for automatic certificate generation.
 Or we can create our own CA and Traefik certificates and configure Traefik to use them.
+
+![image](https://github.com/PickleBoxer/docker-proxy-local-dev/assets/78869247/3f8f5556-9c8c-4770-aae7-cd62726c37ab)
 
 ## Prerequisites
 
