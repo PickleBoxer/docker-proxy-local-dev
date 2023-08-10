@@ -1,0 +1,124 @@
+version: "3.9"
+
+networks:
+  traefik-net:
+    external: true
+
+volumes:
+  data: {}
+
+services:
+  step-ca:
+    container_name: step-ca
+    image: smallstep/step-ca
+    restart: always
+    networks:
+      traefik-net:
+        aliases:
+          - step-ca.docker.local
+    environment:
+      DOCKER_STEPCA_INIT_NAME: Smallstep
+      DOCKER_STEPCA_INIT_DNS_NAMES: step-ca.docker.local,localhost
+      DOCKER_STEPCA_INIT_PROVISIONER_NAME: admin
+      DOCKER_STEPCA_INIT_PASSWORD: pass123
+      DOCKER_STEPCA_INIT_ACME: "true" # initialize acme provider
+    ports:
+      - 9000:9000
+    volumes:
+      - data:/home/step # shared volume between step-ca and traefik to access root ca
+
+  traefik:
+    container_name: traefik
+    #build:
+      #context: .
+    image: traefik
+    restart: always
+    depends_on:
+      - step-ca
+    networks:
+      traefik-net:
+        aliases:
+        # add all pages here
+          - traefik
+          - traefik.docker.local
+          - whoami.docker.local
+          - whoami1.docker.local
+    command:
+      - "--api"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--providers.docker.defaultRule=Host(`{{ trimPrefix `/` .Name }}.docker.local`)"
+      - "--providers.docker.network=traefik-net"
+      - "--accesslog=false"
+      - "--log=true"
+      - "--log.level=DEBUG"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      #- "--certificatesResolvers.myresolver.acme.tlsChallenge=true"
+      - "--certificatesResolvers.myresolver.acme.email=admin"
+      - "--certificatesResolvers.myresolver.acme.storage=acme.json"
+      - "--certificatesresolvers.myresolver.acme.caserver=https://step-ca.docker.local:9000/acme/acme/directory"
+      - "--certificatesResolvers.myresolver.acme.httpChallenge=true"
+      - "--certificatesResolvers.myresolver.acme.httpChallenge.entryPoint=web"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - data:/home/step # shared volume between step-ca and traefik to access root ca
+    environment:
+    #  LEGO_CA_CERTIFICATES: "/root/.step/certs/root_ca.crt" # This is where step installs the cert when the client is bootstrapped.
+      LEGO_CA_CERTIFICATES: "/home/step/certs/root_ca.crt" # use root ca created by step-ca
+      LEGO_CA_SERVER_NAME: "step-ca.docker.local"
+    labels:
+      - "traefik.enable=true"
+
+       # Dashboard
+      - "traefik.http.routers.traefik.rule=Host(`traefik.docker.local`)"
+      - "traefik.http.routers.traefik.service=api@internal"
+      - "traefik.http.routers.traefik.tls.certresolver=myresolver"
+      - "traefik.http.routers.traefik.entrypoints=websecure"
+      - "traefik.http.routers.traefik.middlewares=authtraefik"
+      - "traefik.http.middlewares.authtraefik.basicauth.users=user:$$apr1$$q8eZFHjF$$Fvmkk//V6Btlaf2i/ju5n/" # user/password
+      
+      # global redirect to https
+      - "traefik.http.routers.http-catchall.rule=hostregexp(`{host:.+}`)"
+      - "traefik.http.routers.http-catchall.entrypoints=web"
+      - "traefik.http.routers.http-catchall.middlewares=redirect-to-https"
+
+      # middleware redirect
+      - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
+
+  whoami:
+    container_name: whoami
+    image: containous/whoami:latest
+    hostname: "whoami"
+    depends_on:
+      - traefik
+    networks:
+      traefik-net:
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.whoami.rule=Host(`whoami.docker.local`)"
+      - "traefik.http.routers.whoami.middlewares=auth"
+      - "traefik.http.routers.whoami.entrypoints=websecure"
+      - "traefik.http.routers.whoami.tls=true"
+      - "traefik.http.routers.whoami.tls.certresolver=myresolver"
+      - "traefik.http.middlewares.auth.basicauth.users=user:$$apr1$$q8eZFHjF$$Fvmkk//V6Btlaf2i/ju5n/" # user/password
+
+  whoami1:
+    container_name: whoami1
+    image: containous/whoami:latest
+    depends_on:
+      - traefik
+    networks:
+      traefik-net:
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-net"
+      - "traefik.http.routers.whoami1.rule=Host(`whoami1.docker.local`)"
+      - "traefik.http.routers.whoami1.middlewares=auth"
+      - "traefik.http.routers.whoami1.entrypoints=websecure"
+      - "traefik.http.routers.whoami1.tls=true"
+      - "traefik.http.routers.whoami1.tls.certresolver=myresolver"
+      - "traefik.http.middlewares.auth.basicauth.users=user:$$apr1$$q8eZFHjF$$Fvmkk//V6Btlaf2i/ju5n/" # user/password

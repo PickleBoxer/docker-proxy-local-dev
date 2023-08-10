@@ -1,0 +1,96 @@
+version: "3.7"
+
+services:
+  traefik:
+    image: traefik
+    command:
+      # Entrypoints configuration
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+      ## Forces redirection of incoming requests from `web` to `websecure` entrypoint. https://doc.traefik.io/traefik/routing/entrypoints/#redirection
+      - --entrypoints.web.http.redirections.entryPoint.to=websecure
+      # Docker provider configuration
+      - --providers.docker=true
+      ## Makes sure that services have to explicitly direct Traefik to expose them
+      - --providers.docker.exposedbydefault=false
+      ## Use the secure docker socket proxy
+      - --providers.docker.endpoint=tcp://socket_proxy:2375
+      ## Default docker network to use for connections to all containers
+      - --providers.docker.network=traefik_public
+      # File provider configuration
+      - --providers.file.directory=/traefik/config/my_dynamic_conf
+      # Logging configuration
+      ## Logging levels are DEBUG, PANIC, FATAL, ERROR, WARN, and INFO.
+      - --log.level=info
+      - --log.format=json
+      # Enable dashboard https://doc.traefik.io/traefik/operations/dashboard/#secure-mode
+      - --api.dashboard=true
+      # Enable `ping` https://doc.traefik.io/traefik/operations/ping/
+      ## Checking the Health of Your Traefik Instances
+      - --ping=true
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.dashboard.rule=Host(`traefik.local.dev`) && (PathPrefix(`/api`) || PathPrefix(`/dashboard`))
+      - traefik.http.routers.dashboard.tls=true
+      - traefik.http.routers.dashboard.entrypoints=websecure
+      - traefik.http.routers.dashboard.service=api@internal
+    ports:
+      - 80:80
+      - 443:443
+    volumes:
+      - ./certs:/traefik/config/certs:ro
+      - ./config/dynamic_config.yml:/traefik/config/my_dynamic_conf/conf.yml:ro
+    networks:
+      - traefik_public
+      - socket_proxy
+    restart: unless-stopped
+    healthcheck:
+      # Run traefik healthcheck command
+      # https://doc.traefik.io/traefik/operations/cli/#healthcheck
+      test: ["CMD", "traefik", "healthcheck", "--ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    depends_on:
+      - socket_proxy
+
+  # https://github.com/traefik/whoami
+  whoami:
+    image: traefik/whoami
+    labels:
+      - traefik.enable=true
+      # Router configuration
+      ## Listen to the `websecure` entrypoint
+      - traefik.http.routers.whoami_route.entrypoints=websecure
+      - traefik.http.routers.whoami_route.rule=Host(`whoami.local.dev`)
+      - traefik.http.routers.whoami_route.service=whoami_service
+      ## Enable tls for the `whoami_route`. Even if you do not set this to true, the redirection from http to https will do it for you.
+      - traefik.http.routers.whoami_route.tls=true
+      - traefik.http.services.whoami_service.loadbalancer.server.port=80
+    networks:
+      - traefik_public
+
+  # https://github.com/Tecnativa/docker-socket-proxy
+  # Security-enhanced proxy for the Docker Socket
+  # Giving access to your Docker socket could mean giving root access to your host,
+  # or even to your whole swarm, but some services require hooking into that socket to react to events, etc.
+  # Using this proxy lets you block anything you consider those services should not do.
+  socket_proxy:
+    image: tecnativa/docker-socket-proxy:latest
+    restart: unless-stopped
+    environment:
+      NETWORKS: 1
+      SERVICES: 1
+      CONTAINERS: 1
+      TASKS: 1
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - socket_proxy
+
+networks:
+  traefik_public:
+    external: true
+  socket_proxy:
+    external: true
